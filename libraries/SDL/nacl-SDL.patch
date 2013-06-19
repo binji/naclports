@@ -1044,10 +1044,10 @@ index 0000000..71ae309
 +extern void NACL_PumpEvents(_THIS);
 diff --git a/src/video/nacl/SDL_naclvideo.cc b/src/video/nacl/SDL_naclvideo.cc
 new file mode 100644
-index 0000000..f44377d
+index 0000000..f5fd1d2
 --- /dev/null
 +++ b/src/video/nacl/SDL_naclvideo.cc
-@@ -0,0 +1,401 @@
+@@ -0,0 +1,455 @@
 +#include "SDL_config.h"
 +
 +#include <assert.h>
@@ -1055,18 +1055,17 @@ index 0000000..f44377d
 +#include "SDL_naclvideo.h"
 +#include "SDL_naclevents_c.h"
 +
-+#include <ppapi/cpp/instance.h>
++#include <ppapi/c/pp_errors.h>
++#include <ppapi/cpp/core.h>
 +#include <ppapi/cpp/completion_callback.h>
 +#include <ppapi/cpp/image_data.h>
++#include <ppapi/cpp/instance.h>
 +#include <ppapi/cpp/rect.h>
-+#include <ppapi/c/pp_errors.h>
 +#include <ppapi/gles2/gl2ext_ppapi.h>
 +
 +pp::Instance* gNaclPPInstance;
 +static int gNaclVideoWidth;
 +static int gNaclVideoHeight;
-+
-+static int kNaClFlushDelayMs = 20;
 +
 +#include "SDL_nacl.h"
 +
@@ -1202,6 +1201,9 @@ index 0000000..f44377d
 +  _this->info.current_w = gNaclVideoWidth;
 +  _this->info.current_h = gNaclVideoHeight;
 +
++  _this->hidden->flushing_mu = SDL_CreateMutex();
++  _this->hidden->flushing_cond = SDL_CreateCond();
++
 +  /* We're done! */
 +  return 0;
 +}
@@ -1265,12 +1267,20 @@ index 0000000..f44377d
 +
 +    if (_this->hidden->image_data)
 +      delete _this->hidden->image_data;
++    if (_this->hidden->image_data_extra)
++      delete _this->hidden->image_data_extra;
 +
 +    _this->hidden->image_data = new pp::ImageData(gNaclPPInstance,
 +      PP_IMAGEDATAFORMAT_BGRA_PREMUL,
 +      _this->hidden->context2d->size(),
 +      false);
 +    assert(_this->hidden->image_data != NULL);
++
++    _this->hidden->image_data_extra = new pp::ImageData(gNaclPPInstance,
++      PP_IMAGEDATAFORMAT_BGRA_PREMUL,
++      _this->hidden->context2d->size(),
++      false);
++    assert(_this->hidden->image_data_extra != NULL);
 +
 +    current->pixels = _this->hidden->image_data->data();
 +  }
@@ -1292,6 +1302,23 @@ index 0000000..f44377d
 +  return current;
 +}
 +
++static void NACL_Context2dOnFlushed(void* userdata, int32_t /* result */) {
++  // Flushing finished, we can let NACL_UpdateRects continue if it is blocked.
++  SDL_VideoDevice* _this = (SDL_VideoDevice*)userdata;
++  SDL_LockMutex(_this->hidden->flushing_mu);
++  _this->hidden->flushing = 0;
++  SDL_CondSignal(_this->hidden->flushing_cond);
++  SDL_UnlockMutex(_this->hidden->flushing_mu);
++}
++
++static void NACL_Context2DFlush(void* userdata, int32_t /* result */) {
++  // Flush on the main thread -- this way we can continue drawing on the
++  // worker thread.
++  SDL_VideoDevice* _this = (SDL_VideoDevice*)userdata;
++  pp::CompletionCallback cc(&NACL_Context2dOnFlushed, _this);
++  _this->hidden->context2d->Flush(cc);
++}
++
 +static void NACL_UpdateRects(_THIS, int numrects, SDL_Rect *rects) {
 +  if (_this->hidden->context2d == NULL) // not initialized
 +    return;
@@ -1300,19 +1327,42 @@ index 0000000..f44377d
 +  assert(_this->hidden->w > 0);
 +  assert(_this->hidden->h > 0);
 +
++  // We have to wait until the other flush finishes before we can continue.
++  SDL_LockMutex(_this->hidden->flushing_mu);
++  while (_this->hidden->flushing) {
++    SDL_CondWait(_this->hidden->flushing_cond, _this->hidden->flushing_mu);
++  }
++  _this->hidden->flushing = 1;
++  SDL_UnlockMutex(_this->hidden->flushing_mu);
++
 +  // Clear alpha channel in the ImageData.
++  size_t buffer_char_size = _this->hidden->w * _this->hidden->h * _this->hidden->bpp / 8;
 +  unsigned char* start = (unsigned char*)_this->hidden->image_data->data();
-+  unsigned char* end = start + (_this->hidden->w * _this->hidden->h * _this->hidden->bpp / 8);
++  unsigned char* end = start + buffer_char_size;
 +  for (unsigned char* p = start + 3; p < end; p +=4)
 +    *p = 0xFF;
 +
-+  // Flush on the main thread.
 +  for (int i = 0; i < numrects; ++i) {
 +    SDL_Rect& r = rects[i];
 +    _this->hidden->context2d->PaintImageData(*_this->hidden->image_data, pp::Point(), pp::Rect(r.x, r.y, r.w, r.h));
 +  }
 +
-+  _this->hidden->context2d->Flush(pp::BlockUntilComplete());
++  // Swap current buffer.
++  pp::ImageData* temp_image_data = _this->hidden->image_data;
++  _this->hidden->image_data = _this->hidden->image_data_extra;
++  _this->hidden->image_data_extra = temp_image_data;
++
++  // |pixels| now points to the other buffer.
++  SDL_Surface* current = SDL_VideoSurface;
++  const void* old_pixels = current->pixels;
++  current->pixels = _this->hidden->image_data->data();
++
++  // Copy data from the old buffer to the new buffer.
++  memcpy(current->pixels, old_pixels, buffer_char_size);
++
++  // Flush on the main thread.
++  pp::CompletionCallback cc(&NACL_Context2DFlush, _this);
++  pp::Module::Get()->core()->CallOnMainThread(0, cc);
 +}
 +
 +static void NACL_FreeWMCursor(_THIS, WMcursor *cursor) {
@@ -1342,6 +1392,10 @@ index 0000000..f44377d
 +  delete _this->hidden->context2d;
 +  delete _this->hidden->context3d;
 +  delete _this->hidden->image_data;
++  delete _this->hidden->image_data_extra;
++
++  SDL_DestroyCond(_this->hidden->flushing_cond);
++  SDL_DestroyMutex(_this->hidden->flushing_mu);
 +}
 +
 +#ifdef SDL_VIDEO_OPENGL_REGAL
@@ -1451,10 +1505,10 @@ index 0000000..f44377d
 +} // extern "C"
 diff --git a/src/video/nacl/SDL_naclvideo.h b/src/video/nacl/SDL_naclvideo.h
 new file mode 100644
-index 0000000..a9fb7b5
+index 0000000..9fae14e
 --- /dev/null
 +++ b/src/video/nacl/SDL_naclvideo.h
-@@ -0,0 +1,36 @@
+@@ -0,0 +1,41 @@
 +#include "SDL_config.h"
 +
 +#ifndef _SDL_naclvideo_h
@@ -1485,7 +1539,12 @@ index 0000000..a9fb7b5
 +  int ow, oh; // plugin output dimensions
 +  int fsw, fsh; // fullscreen dimensions
 +
++  int flushing;
++  SDL_mutex* flushing_mu; // protects |flushing|.
++  SDL_cond* flushing_cond;
++
 +  pp::ImageData* image_data;
++  pp::ImageData* image_data_extra;
 +  pp::Graphics2D* context2d;  // The PPAPI 2D drawing context.
 +  pp::Graphics3D* context3d;  // The PPAPI 3D drawing context.
 +};
