@@ -50,7 +50,7 @@ index 5ecc18b..7693a2a 100755
  		;;
  	-nto*)
 diff --git a/configure.in b/configure.in
-index a7e9b18..ca1de7e 100644
+index a7e9b18..f063bfd 100644
 --- a/configure.in
 +++ b/configure.in
 @@ -885,6 +885,48 @@ CheckVisibilityHidden()
@@ -109,7 +109,7 @@ index a7e9b18..ca1de7e 100644
 +    *-nacl)
 +        ARCH=nacl
 +        CheckNativeClient
-+        CheckOpenGLRegal
++        # CheckOpenGLRegal
 +        CheckDummyAudio
 +        CheckDummyVideo
 +        CheckInputEvents
@@ -1044,10 +1044,10 @@ index 0000000..71ae309
 +extern void NACL_PumpEvents(_THIS);
 diff --git a/src/video/nacl/SDL_naclvideo.cc b/src/video/nacl/SDL_naclvideo.cc
 new file mode 100644
-index 0000000..f5fd1d2
+index 0000000..659529c
 --- /dev/null
 +++ b/src/video/nacl/SDL_naclvideo.cc
-@@ -0,0 +1,455 @@
+@@ -0,0 +1,594 @@
 +#include "SDL_config.h"
 +
 +#include <assert.h>
@@ -1058,8 +1058,8 @@ index 0000000..f5fd1d2
 +#include <ppapi/c/pp_errors.h>
 +#include <ppapi/cpp/core.h>
 +#include <ppapi/cpp/completion_callback.h>
-+#include <ppapi/cpp/image_data.h>
 +#include <ppapi/cpp/instance.h>
++#include <ppapi/cpp/module.h>
 +#include <ppapi/cpp/rect.h>
 +#include <ppapi/gles2/gl2ext_ppapi.h>
 +
@@ -1095,9 +1095,25 @@ index 0000000..f5fd1d2
 +    current_video->hidden->oh = height;
 +    SDL_PrivateResize(width, height);
 +  }
++
++  glInitializePPAPI(pp::Module::Get()->get_browser_interface());
 +}
 +
-+static void flush(void* data, int32_t unused);
++struct Vertex {
++  float x, y, z;
++  float t, u, v;
++};
++
++static uint32_t NPOT(uint32_t x) {
++  x--;
++  x |= x >> 1;
++  x |= x >> 2;
++  x |= x >> 4;
++  x |= x >> 8;
++  x |= x >> 16;
++  x++;
++  return x;
++}
 +
 +/* Initialization/Query functions */
 +static int NACL_VideoInit(_THIS, SDL_PixelFormat *vformat);
@@ -1201,8 +1217,8 @@ index 0000000..f5fd1d2
 +  _this->info.current_w = gNaclVideoWidth;
 +  _this->info.current_h = gNaclVideoHeight;
 +
-+  _this->hidden->flushing_mu = SDL_CreateMutex();
-+  _this->hidden->flushing_cond = SDL_CreateCond();
++  _this->hidden->mutex = SDL_CreateMutex();
++  _this->hidden->cond = SDL_CreateCond();
 +
 +  /* We're done! */
 +  return 0;
@@ -1227,66 +1243,31 @@ index 0000000..f5fd1d2
 +  _this->hidden->w = width;
 +  _this->hidden->h = height;
 +
-+  if (_this->hidden->context2d) {
-+    delete _this->hidden->context2d;
-+    _this->hidden->context2d = NULL;
-+  }
-+
 +  if (_this->hidden->context3d) {
 +    delete _this->hidden->context3d;
 +    _this->hidden->context3d = NULL;
 +  }
 +
-+  if (flags & SDL_OPENGL) {
-+    int32_t attribs[] = {
-+      PP_GRAPHICS3DATTRIB_ALPHA_SIZE, 8,
-+      PP_GRAPHICS3DATTRIB_DEPTH_SIZE, 24,
-+      PP_GRAPHICS3DATTRIB_STENCIL_SIZE, 8,
-+      PP_GRAPHICS3DATTRIB_SAMPLES, 0,
-+      PP_GRAPHICS3DATTRIB_SAMPLE_BUFFERS, 0,
-+      PP_GRAPHICS3DATTRIB_WIDTH, width,
-+      PP_GRAPHICS3DATTRIB_HEIGHT, height,
-+      PP_GRAPHICS3DATTRIB_NONE
-+    };
-+    _this->hidden->context3d = new pp::Graphics3D(gNaclPPInstance,
-+                                                  pp::Graphics3D(),
-+                                                  attribs);
-+    if (!gNaclPPInstance->BindGraphics(*_this->hidden->context3d)) {
-+      fprintf(stderr, "***** Couldn't bind the graphic3d context *****\n");
-+      return NULL;
-+    }
-+  } else {
-+    _this->hidden->context2d =
-+      new pp::Graphics2D(gNaclPPInstance, pp::Size(width, height), false);
-+    assert(_this->hidden->context2d != NULL);
-+
-+    if (!gNaclPPInstance->BindGraphics(*_this->hidden->context2d)) {
-+      fprintf(stderr, "***** Couldn't bind the graphic2d context *****\n");
-+      return NULL;
-+    }
-+
-+    if (_this->hidden->image_data)
-+      delete _this->hidden->image_data;
-+    if (_this->hidden->image_data_extra)
-+      delete _this->hidden->image_data_extra;
-+
-+    _this->hidden->image_data = new pp::ImageData(gNaclPPInstance,
-+      PP_IMAGEDATAFORMAT_BGRA_PREMUL,
-+      _this->hidden->context2d->size(),
-+      false);
-+    assert(_this->hidden->image_data != NULL);
-+
-+    _this->hidden->image_data_extra = new pp::ImageData(gNaclPPInstance,
-+      PP_IMAGEDATAFORMAT_BGRA_PREMUL,
-+      _this->hidden->context2d->size(),
-+      false);
-+    assert(_this->hidden->image_data_extra != NULL);
-+
-+    current->pixels = _this->hidden->image_data->data();
++  int32_t attribs[] = {
++    PP_GRAPHICS3DATTRIB_ALPHA_SIZE, 8,
++    PP_GRAPHICS3DATTRIB_DEPTH_SIZE, 24,
++    PP_GRAPHICS3DATTRIB_STENCIL_SIZE, 8,
++    PP_GRAPHICS3DATTRIB_SAMPLES, 0,
++    PP_GRAPHICS3DATTRIB_SAMPLE_BUFFERS, 0,
++    PP_GRAPHICS3DATTRIB_WIDTH, width,
++    PP_GRAPHICS3DATTRIB_HEIGHT, height,
++    PP_GRAPHICS3DATTRIB_NONE
++  };
++  _this->hidden->context3d = new pp::Graphics3D(gNaclPPInstance,
++                                                pp::Graphics3D(),
++                                                attribs);
++  if (!gNaclPPInstance->BindGraphics(*_this->hidden->context3d)) {
++    fprintf(stderr, "***** Couldn't bind the graphic3d context *****\n");
++    return NULL;
 +  }
 +
 +  /* Allocate the new pixel format for the screen */
-+  if (!SDL_ReallocFormat(current, bpp, 0xFF0000, 0xFF00, 0xFF, 0)) {
++  if (!SDL_ReallocFormat(current, bpp, 0xFF, 0xFF00, 0xFF0000, 0)) {
 +    SDL_SetError("Couldn't allocate new pixel format for requested mode");
 +    return NULL;
 +  }
@@ -1296,72 +1277,236 @@ index 0000000..f5fd1d2
 +  _this->hidden->bpp = bpp;
 +  _this->hidden->w = current->w = width;
 +  _this->hidden->h = current->h = height;
++  _this->hidden->swapping = 0;
 +  current->pitch = current->w * (bpp / 8);
++  current->pixels = (uint32_t*)SDL_malloc(current->pitch * height);
++  memset(current->pixels, 0, current->pitch * height);
++
++  fprintf(stderr, "Starting GL initialization...\n");
++
++  int32_t pp_resource = _this->hidden->context3d->pp_resource();
++  glSetCurrentContextPPAPI(pp_resource);
++  glViewport(0, 0, width, height);
++
++  if (glGetError() != GL_NO_ERROR) {
++    fprintf(stderr, "glViewport error\n");
++    return NULL;
++  }
++
++  const char* vert_source =
++      "attribute vec2 a_tex;\n"
++      "attribute vec4 a_pos;\n"
++      "varying vec2 v_tex;\n"
++      "void main() {\n"
++      "  gl_Position = a_pos;\n"
++      "  v_tex = a_tex;\n"
++      "}";
++  GLuint vert_shader = glCreateShader(GL_VERTEX_SHADER);
++  glShaderSource(vert_shader, 1, &vert_source, NULL);
++
++  if (glGetError() != GL_NO_ERROR) {
++    fprintf(stderr, "glShaderSource (vert) error\n");
++    return NULL;
++  }
++
++  glCompileShader(vert_shader);
++
++  {
++    GLint status;
++    glGetShaderiv(vert_shader, GL_COMPILE_STATUS, &status);
++
++    if (status == GL_FALSE) {
++      GLint infologlen;
++      glGetShaderiv(vert_shader, GL_INFO_LOG_LENGTH, &infologlen);
++      GLchar *errorlog = new GLchar[infologlen + 1];
++      glGetShaderInfoLog(vert_shader, infologlen, NULL, errorlog);
++      fprintf(stderr, "glCompileShader failed (vert):\n%s\n", errorlog);
++      delete[] errorlog;
++      return NULL;
++    }
++  }
++
++  const char* frag_source =
++      "precision mediump float;\n"
++      "varying vec2 v_tex;\n"
++      "uniform sampler2D u_tex;\n"
++      "void main() {\n"
++      "  gl_FragColor = texture2D(u_tex, v_tex);\n"
++      "  gl_FragColor.a = 1.0;\n"
++      "}";
++  GLuint frag_shader = glCreateShader(GL_FRAGMENT_SHADER);
++  glShaderSource(frag_shader, 1, &frag_source, NULL);
++
++  if (glGetError() != GL_NO_ERROR) {
++    fprintf(stderr, "glShaderSource error (frag)\n");
++    return NULL;
++  }
++
++  glCompileShader(frag_shader);
++
++  {
++    GLint status;
++    glGetShaderiv(frag_shader, GL_COMPILE_STATUS, &status);
++
++    if (status == GL_FALSE) {
++      GLint infologlen;
++      glGetShaderiv(frag_shader, GL_INFO_LOG_LENGTH, &infologlen);
++      GLchar *errorlog = new GLchar[infologlen + 1];
++      glGetShaderInfoLog(frag_shader, infologlen, NULL, errorlog);
++      fprintf(stderr, "glCompileShader failed (frag):\n%s\n", errorlog);
++      delete[] errorlog;
++      return NULL;
++    }
++  }
++
++
++  _this->hidden->prog = glCreateProgram();
++  glAttachShader(_this->hidden->prog, vert_shader);
++  glAttachShader(_this->hidden->prog, frag_shader);
++  glLinkProgram(_this->hidden->prog);
++
++  {
++    GLint status;
++    glGetProgramiv(_this->hidden->prog, GL_LINK_STATUS, &status);
++
++    if (status == GL_FALSE) {
++      GLint strlen, nullpos;
++      glGetProgramiv(_this->hidden->prog, GL_INFO_LOG_LENGTH, &strlen);
++      char *tempstr = new char[strlen+1];
++      // be extra sure that the error string will be 0-terminated
++      memset(tempstr, '\0', strlen+1);
++      glGetProgramInfoLog(_this->hidden->prog, strlen, &nullpos, tempstr);
++      tempstr[nullpos] = '\0';
++
++      fprintf(stderr, "glLinkProgram failed:\n%s\n", tempstr);
++
++      delete[] tempstr;
++    }
++  }
++
++  GLuint texture_width = NPOT(width);
++  GLuint texture_height = NPOT(height);
++
++  float tex_right = (float)width / texture_width;
++  float tex_bottom = (float)height / texture_height;
++
++  // Fullscreen quad.
++  Vertex verts[4] = {
++    { -1.0f, +1.0f, 0.0f, 0.0f, 0.0f, 0.0f },
++    { -1.0f, -1.0f, 0.0f, 0.0f, tex_bottom, 0.0f },
++    { +1.0f, +1.0f, 0.0f, tex_right, 0.0f, 0.0f },
++    { +1.0f, -1.0f, 0.0f, tex_right, tex_bottom, 0.0f },
++  };
++
++  glGenBuffers(1, &_this->hidden->buffer_id);
++  glBindBuffer(GL_ARRAY_BUFFER, _this->hidden->buffer_id);
++  glBufferData(GL_ARRAY_BUFFER, 4 * sizeof(Vertex), &verts[0], GL_STATIC_DRAW);
++
++  if (glGetError() != GL_NO_ERROR) {
++    fprintf(stderr, "glBufferData error\n");
++    return NULL;
++  }
++
++  glGenTextures(1, &_this->hidden->texture_id);
++  glBindTexture(GL_TEXTURE_2D, _this->hidden->texture_id);
++  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
++  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, texture_width, texture_height,
++               0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
++
++  if (glGetError() != GL_NO_ERROR) {
++    fprintf(stderr, "glTexImage2D error\n");
++    return NULL;
++  }
++
++  _this->hidden->u_tex = glGetUniformLocation(_this->hidden->prog, "u_tex");
++  _this->hidden->a_pos = glGetAttribLocation(_this->hidden->prog, "a_pos");
++  _this->hidden->a_tex = glGetAttribLocation(_this->hidden->prog, "a_tex");
++
++  if (glGetError() != GL_NO_ERROR) {
++    fprintf(stderr, "glGetAttribLocation error\n");
++    return NULL;
++  }
 +
 +  /* We're done */
 +  return current;
 +}
 +
-+static void NACL_Context2dOnFlushed(void* userdata, int32_t /* result */) {
-+  // Flushing finished, we can let NACL_UpdateRects continue if it is blocked.
++static void NACL_SwapFinished(void* userdata, int32_t /* result */) {
 +  SDL_VideoDevice* _this = (SDL_VideoDevice*)userdata;
-+  SDL_LockMutex(_this->hidden->flushing_mu);
-+  _this->hidden->flushing = 0;
-+  SDL_CondSignal(_this->hidden->flushing_cond);
-+  SDL_UnlockMutex(_this->hidden->flushing_mu);
++  SDL_LockMutex(_this->hidden->mutex);
++  _this->hidden->swapping = 0;
++  SDL_CondSignal(_this->hidden->cond);
++  SDL_UnlockMutex(_this->hidden->mutex);
 +}
 +
-+static void NACL_Context2DFlush(void* userdata, int32_t /* result */) {
-+  // Flush on the main thread -- this way we can continue drawing on the
-+  // worker thread.
++static void NACL_SwapOnMainThread(void* userdata, int32_t /* result */) {
 +  SDL_VideoDevice* _this = (SDL_VideoDevice*)userdata;
-+  pp::CompletionCallback cc(&NACL_Context2dOnFlushed, _this);
-+  _this->hidden->context2d->Flush(cc);
++  pp::CompletionCallback cc(&NACL_SwapFinished, _this);
++  _this->hidden->context3d->SwapBuffers(cc);
 +}
 +
 +static void NACL_UpdateRects(_THIS, int numrects, SDL_Rect *rects) {
-+  if (_this->hidden->context2d == NULL) // not initialized
++  if (_this->hidden->context3d == NULL) // not initialized
 +    return;
 +
-+  assert(_this->hidden->image_data);
++  // Block until we can swap again.
++  SDL_LockMutex(_this->hidden->mutex);
++  while (_this->hidden->swapping) {
++    SDL_CondWait(_this->hidden->cond, _this->hidden->mutex);
++  }
++  _this->hidden->swapping = 1;
++  SDL_UnlockMutex(_this->hidden->mutex);
++
 +  assert(_this->hidden->w > 0);
 +  assert(_this->hidden->h > 0);
 +
-+  // We have to wait until the other flush finishes before we can continue.
-+  SDL_LockMutex(_this->hidden->flushing_mu);
-+  while (_this->hidden->flushing) {
-+    SDL_CondWait(_this->hidden->flushing_cond, _this->hidden->flushing_mu);
++  glClearColor(0, 0, 0, 1);
++  glClear(GL_COLOR_BUFFER_BIT);
++
++  glActiveTexture(GL_TEXTURE0);
++  glBindTexture(GL_TEXTURE_2D, _this->hidden->texture_id);
++
++#if 0
++  if (glGetError() != GL_NO_ERROR) {
++    fprintf(stderr, "glBindTexture error\n");
++    return;
 +  }
-+  _this->hidden->flushing = 1;
-+  SDL_UnlockMutex(_this->hidden->flushing_mu);
++#endif
 +
-+  // Clear alpha channel in the ImageData.
-+  size_t buffer_char_size = _this->hidden->w * _this->hidden->h * _this->hidden->bpp / 8;
-+  unsigned char* start = (unsigned char*)_this->hidden->image_data->data();
-+  unsigned char* end = start + buffer_char_size;
-+  for (unsigned char* p = start + 3; p < end; p +=4)
-+    *p = 0xFF;
++  glTexSubImage2D(GL_TEXTURE_2D, 0,
++                  0, 0, _this->hidden->w, _this->hidden->h,
++                  GL_RGBA, GL_UNSIGNED_BYTE, _this->screen->pixels);
++#if 0
++    if (glGetError() != GL_NO_ERROR) {
++      fprintf(stderr, "glTexSubImage2D error\n");
++      return;
++    }
++#endif
 +
-+  for (int i = 0; i < numrects; ++i) {
-+    SDL_Rect& r = rects[i];
-+    _this->hidden->context2d->PaintImageData(*_this->hidden->image_data, pp::Point(), pp::Rect(r.x, r.y, r.w, r.h));
++  glUseProgram(_this->hidden->prog);
++  glUniform1i(_this->hidden->u_tex, 0);
++  glVertexAttribPointer(_this->hidden->a_pos, 3, GL_FLOAT, GL_FALSE,
++                        sizeof(Vertex), (void*)offsetof(Vertex, x));
++  glEnableVertexAttribArray(_this->hidden->a_pos);
++
++  glVertexAttribPointer(_this->hidden->a_tex, 2, GL_FLOAT, GL_FALSE,
++                        sizeof(Vertex), (void*)offsetof(Vertex, t));
++  glEnableVertexAttribArray(_this->hidden->a_tex);
++
++  glBindBuffer(GL_ARRAY_BUFFER, _this->hidden->buffer_id);
++  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
++
++#if 0
++  if (glGetError() != GL_NO_ERROR) {
++    fprintf(stderr, "glDrawArrays error\n");
++    return;
 +  }
++#endif
 +
-+  // Swap current buffer.
-+  pp::ImageData* temp_image_data = _this->hidden->image_data;
-+  _this->hidden->image_data = _this->hidden->image_data_extra;
-+  _this->hidden->image_data_extra = temp_image_data;
++  glUseProgram(0);
 +
-+  // |pixels| now points to the other buffer.
-+  SDL_Surface* current = SDL_VideoSurface;
-+  const void* old_pixels = current->pixels;
-+  current->pixels = _this->hidden->image_data->data();
-+
-+  // Copy data from the old buffer to the new buffer.
-+  memcpy(current->pixels, old_pixels, buffer_char_size);
-+
-+  // Flush on the main thread.
-+  pp::CompletionCallback cc(&NACL_Context2DFlush, _this);
++  pp::CompletionCallback cc(&NACL_SwapOnMainThread, _this);
 +  pp::Module::Get()->core()->CallOnMainThread(0, cc);
 +}
 +
@@ -1385,17 +1530,11 @@ index 0000000..f5fd1d2
 +   another SDL video routine -- notably UpdateRects.
 +*/
 +void NACL_VideoQuit(_THIS) {
-+  // No need to free pixels as this is a pointer directly to
-+  // the pixel data within the image_data.
-+  _this->screen->pixels = NULL;
-+
-+  delete _this->hidden->context2d;
++  SDL_free(_this->screen->pixels);
 +  delete _this->hidden->context3d;
-+  delete _this->hidden->image_data;
-+  delete _this->hidden->image_data_extra;
-+
-+  SDL_DestroyCond(_this->hidden->flushing_cond);
-+  SDL_DestroyMutex(_this->hidden->flushing_mu);
++  
++  SDL_DestroyCond(_this->hidden->cond);
++  SDL_DestroyMutex(_this->hidden->mutex);
 +}
 +
 +#ifdef SDL_VIDEO_OPENGL_REGAL
@@ -1505,10 +1644,10 @@ index 0000000..f5fd1d2
 +} // extern "C"
 diff --git a/src/video/nacl/SDL_naclvideo.h b/src/video/nacl/SDL_naclvideo.h
 new file mode 100644
-index 0000000..9fae14e
+index 0000000..37e98e6
 --- /dev/null
 +++ b/src/video/nacl/SDL_naclvideo.h
-@@ -0,0 +1,41 @@
+@@ -0,0 +1,47 @@
 +#include "SDL_config.h"
 +
 +#ifndef _SDL_naclvideo_h
@@ -1523,6 +1662,8 @@ index 0000000..9fae14e
 +#include <ppapi/cpp/graphics_2d.h>
 +#include <ppapi/cpp/graphics_3d.h>
 +#include <vector>
++
++#include <GLES2/gl2.h>
 +
 +
 +/* Hidden "this" pointer for the video functions */
@@ -1539,13 +1680,17 @@ index 0000000..9fae14e
 +  int ow, oh; // plugin output dimensions
 +  int fsw, fsh; // fullscreen dimensions
 +
-+  int flushing;
-+  SDL_mutex* flushing_mu; // protects |flushing|.
-+  SDL_cond* flushing_cond;
++  GLuint prog;
++  GLuint buffer_id;
++  GLuint texture_id;
++  GLuint u_tex;
++  GLuint a_pos;
++  GLuint a_tex;
 +
-+  pp::ImageData* image_data;
-+  pp::ImageData* image_data_extra;
-+  pp::Graphics2D* context2d;  // The PPAPI 2D drawing context.
++  int swapping;
++  SDL_mutex* mutex;
++  SDL_cond* cond;
++
 +  pp::Graphics3D* context3d;  // The PPAPI 3D drawing context.
 +};
 +
@@ -1596,6 +1741,19 @@ index 0000000..0a6a0cd
 +};
 +
 +#endif // _SDL_nacl_eventqueue_h
+diff --git a/test/Makefile.in b/test/Makefile.in
+index 7d5bb8b..2346b14 100644
+--- a/test/Makefile.in
++++ b/test/Makefile.in
+@@ -7,7 +7,7 @@ EXE	= @EXE@
+ CFLAGS  = @CFLAGS@
+ LIBS	= @LIBS@
+ 
+-TARGETS = checkkeys$(EXE) graywin$(EXE) loopwave$(EXE) testalpha$(EXE) testbitmap$(EXE) testblitspeed$(EXE) testcdrom$(EXE) testcursor$(EXE) testdyngl$(EXE) testerror$(EXE) testfile$(EXE) testgamma$(EXE) testgl$(EXE) testhread$(EXE) testiconv$(EXE) testjoystick$(EXE) testkeys$(EXE) testlock$(EXE) testoverlay2$(EXE) testoverlay$(EXE) testpalette$(EXE) testplatform$(EXE) testsem$(EXE) testsprite$(EXE) testtimer$(EXE) testver$(EXE) testvidinfo$(EXE) testwin$(EXE) testwm$(EXE) threadwin$(EXE) torturethread$(EXE) testloadso$(EXE)
++TARGETS = checkkeys$(EXE) graywin$(EXE) loopwave$(EXE) testalpha$(EXE) testbitmap$(EXE) testblitspeed$(EXE) testcdrom$(EXE) testcursor$(EXE) testdyngl$(EXE) testerror$(EXE) testfile$(EXE) testgamma$(EXE) testhread$(EXE) testiconv$(EXE) testjoystick$(EXE) testkeys$(EXE) testlock$(EXE) testoverlay2$(EXE) testoverlay$(EXE) testpalette$(EXE) testplatform$(EXE) testsem$(EXE) testsprite$(EXE) testtimer$(EXE) testver$(EXE) testvidinfo$(EXE) testwin$(EXE) testwm$(EXE) threadwin$(EXE) torturethread$(EXE) testloadso$(EXE)
+ 
+ all: $(TARGETS)
+ 
 diff --git a/test/configure.in b/test/configure.in
 index 7c25c17..f24fb44 100644
 --- a/test/configure.in
