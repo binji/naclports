@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Pushover 0.0.3</title>
+    <meta HTTP-EQUIV="Pragma" CONTENT="no-cache">
+    <meta HTTP-EQUIV="Expires" CONTENT="-1">
+
+    <script type="text/javascript">
+      function moduleDidLoad() {
+        document.getElementById('message').hidden = true;
+      }
+    </script>
+  </head>
+  <body>
+    <h1>Pushover 0.0.3</h1>
+    <p>
+      Pushover is a puzzle game developed by Red Rat Software and published by
+      Ocean Software, released in 1992. This is a Native Client port of a
+      remake of that game. The remake can be found at
+      <a href="http://pushover.sourceforge.net">
+        http://pushover.sourceforge.net
+      </a>.
+    </p>
+    <p>
+      In Pushover, you play an ant trying to push over dominoes. In order to 
+      complete a level, you can pick up and move the dominoes, and push
+      <strong>one</strong> domino.
+    </p>
+    <h3>Controls</h3>
+    <ul>
+      <li>Left/right arrow keys: move left and right</li>
+      <li>Up/down arrow keys: climb ladders, or step aside a domino (prepare 
+        to push it)</li>
+      <li>Space: pick up or put down a domino. When standing aside a domino, 
+        hold space and push left or right to push the domino that 
+        direction.</li>
+      <li>F1: get help about domino types</li>
+      <li>Esc: open the main menu</li>
+    </ul>
+    <div id="message">Loading...</div>
+    <div id="listener">
+      <script type="text/javascript">
+        document.getElementById('listener').
+            addEventListener('load', moduleDidLoad, true);
+      </script>
+      <embed name="nacl_module"
+             id="pushover"
+             width=800 height=600
+             src="pushover.nmf"
+             type="application/x-nacl" />
+    </div>
+    <br>
+  </body>
+</html>

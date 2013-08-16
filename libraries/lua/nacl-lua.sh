@@ -24,6 +24,11 @@ CustomInstallStep() {
   cd src
   WriteSelLdrScript lua.sh lua
   WriteSelLdrScript luac.sh luac
+
+  # install lua.pc
+  sed "s|^prefix= .*|prefix= ${NACLPORTS_PREFIX}|" \
+      ${NACL_PACKAGES_REPOSITORY}/${PACKAGE_NAME}/etc/lua.pc > \
+      ${NACLPORTS_PREFIX}/lib/pkgconfig/lua.pc
 }
 
 

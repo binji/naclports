@@ -1,0 +1,85 @@
+diff --git a/src/main.cpp b/src/main.cpp
+index 4d2bb4f..6c7110d 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -11,6 +11,9 @@
+ #include "tools.h"
+ 
+ #include <SDL.h>
++#ifdef __native_client__
++#include <SDL_main.h>
++#endif
+ 
+ #include <vector>
+ #include <fstream>
+@@ -21,7 +24,9 @@
+ #include <sys/types.h>
+ #include <sys/stat.h>
+ #include <unistd.h>
++#ifndef __native_client__
+ #include <libintl.h>
++#endif
+ 
+ static void check_record(const std::string & rec_path, levelsetList_c & levelsetList,
+                          unsigned int & count, unsigned int & failed,
+@@ -231,11 +236,13 @@ int main(int argc, char * argv[]) {
+   bool fullscreen = false;
+   if (argc >= 2 && strcmp(argv[1], "-f") == 0) fullscreen = true;
+ 
++#ifndef __native_client__
+   // setup internationalisation
+   setlocale(LC_MESSAGES, "");
+   bindtextdomain("pushover", getLocaleDir().c_str());
+   bind_textdomain_codeset("pushover", "UTF-8");
+   textdomain("pushover");
++#endif
+ 
+   // now off to all modes that use graphics
+   const std::string datadir = getDataDir();
+diff --git a/src/pngloader.cpp b/src/pngloader.cpp
+index df4d02d..006b75b 100644
+--- a/src/pngloader.cpp
++++ b/src/pngloader.cpp
+@@ -1,6 +1,6 @@
+ #include "pngloader.h"
+ 
+-#include "../config.h"
++#include "config.h"
+ 
+ #include <iostream>
+ 
+diff --git a/src/screen.cpp b/src/screen.cpp
+index 196e32b..2024d7f 100644
+--- a/src/screen.cpp
++++ b/src/screen.cpp
+@@ -2,7 +2,12 @@
+ 
+ #include "graphics.h"
+ 
++#ifndef __native_client__
+ #include "libintl.h"
++#else  // __native_client__
++// Dummy gettext()
++static const char* gettext(const char* s) { return s; }
++#endif  // __native_client__
+ 
+ #include <SDL/SDL_ttf.h>
+ 
+diff --git a/src/window.cpp b/src/window.cpp
+index 2b69534..77aab41 100644
+--- a/src/window.cpp
++++ b/src/window.cpp
+@@ -9,7 +9,12 @@
+ #include <SDL.h>
+ 
+ #include <stdexcept>
+-#include <libintl.h>
++#ifndef __native_client__
++#include "libintl.h"
++#else  // __native_client__
++// Dummy gettext()
++static const char* gettext(const char* s) { return s; }
++#endif  // __native_client__
+ 
+ 
+ 
