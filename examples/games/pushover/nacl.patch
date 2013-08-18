@@ -1,28 +1,39 @@
 diff --git a/src/main.cpp b/src/main.cpp
-index 4d2bb4f..6c7110d 100644
+index 4d2bb4f..fc7dd9e 100644
 --- a/src/main.cpp
 +++ b/src/main.cpp
-@@ -11,6 +11,9 @@
- #include "tools.h"
- 
- #include <SDL.h>
-+#ifdef __native_client__
-+#include <SDL_main.h>
-+#endif
- 
- #include <vector>
- #include <fstream>
-@@ -21,7 +24,9 @@
+@@ -21,7 +21,17 @@
  #include <sys/types.h>
  #include <sys/stat.h>
  #include <unistd.h>
 +#ifndef __native_client__
  #include <libintl.h>
 +#endif
++
++#ifdef __native_client__
++#include <assert.h>
++#include <fcntl.h>
++#include <libtar.h>
++#include <sys/mount.h>
++#endif
++
  
  static void check_record(const std::string & rec_path, levelsetList_c & levelsetList,
                           unsigned int & count, unsigned int & failed,
-@@ -231,11 +236,13 @@ int main(int argc, char * argv[]) {
+@@ -205,8 +215,11 @@ typedef enum {
+   ST_ABOUT,
+ } states_e;
+ 
+-
++#ifdef __native_client__
++int pushover_main(int argc, char * argv[]) {
++#else
+ int main(int argc, char * argv[]) {
++#endif
+ 
+   // filter out the no graphic cases, they are special and will be treated
+   // separately
+@@ -231,11 +244,13 @@ int main(int argc, char * argv[]) {
    bool fullscreen = false;
    if (argc >= 2 && strcmp(argv[1], "-f") == 0) fullscreen = true;
  
@@ -36,6 +47,37 @@ index 4d2bb4f..6c7110d 100644
  
    // now off to all modes that use graphics
    const std::string datadir = getDataDir();
+@@ -817,3 +832,30 @@ int main(int argc, char * argv[]) {
+ 
+   return 0;
+ }
++
++#ifdef __native_client__
++int main(int argc, char* argv[]) {
++  umount("/");
++  mount("", "/", "memfs", 0, NULL);
++  mount("", "/home", "html5fs", 0, "type=PERSISTENT");
++  mount("/", "/http", "httpfs", 0, NULL);
++
++  mkdir("/home", 0777);
++  mkdir("/data", 0777);
++  chdir("/data");
++
++  setenv("HOME", "/home", 1);
++
++  TAR* tar;
++  int ret = tar_open(&tar, "/http/pushover.tar", NULL, O_RDONLY, 0, 0);
++  assert(ret == 0);
++
++  ret = tar_extract_all(tar, "/data");
++  assert(ret == 0);
++
++  ret = tar_close(tar);
++  assert(ret == 0);
++
++  return pushover_main(argc, argv);
++}
++#endif
 diff --git a/src/pngloader.cpp b/src/pngloader.cpp
 index df4d02d..006b75b 100644
 --- a/src/pngloader.cpp
@@ -49,7 +91,7 @@ index df4d02d..006b75b 100644
  #include <iostream>
  
 diff --git a/src/screen.cpp b/src/screen.cpp
-index 196e32b..2024d7f 100644
+index 196e32b..5297351 100644
 --- a/src/screen.cpp
 +++ b/src/screen.cpp
 @@ -2,7 +2,12 @@
@@ -65,6 +107,119 @@ index 196e32b..2024d7f 100644
  
  #include <SDL/SDL_ttf.h>
  
+@@ -172,17 +177,46 @@ static int f1(int x, int y, int a) { return clip(y*256/4+x*256/20 - 1024 + a*((1
+ static int f2(int x, int y, int a) { return clip(y*x*256/65 - 1024 + a*((1024+256)/64)); }
+ static int f3(int x, int y, int a) { return clip(((2*y-12)*(2*y-12)+(2*x-19)*(2*x-19))*256/127 - 1024 + a*((1024+256)/64)); }
+ 
+-static void u1(SDL_Surface * video, int x, int y, int f0, int f, int blx, int bly) {
++static const int kMaxRects = 10000;
++static int s_NumRects = 0;
++static SDL_Rect s_Rects[kMaxRects];
++static int s_ResX = 0;
++static int s_ResY = 0;
++
++static void UpdateRect(int x, int y, int w, int h)
++{
++  if (s_NumRects >= kMaxRects ||
++      w < 0 || h < 0 ||
++      x < 0 || x + w > s_ResX ||
++      y < 0 || y + h > s_ResY)
++  {
++    return;
++  }
++
++  SDL_Rect& rect = s_Rects[s_NumRects++];
++  rect.x = x;
++  rect.y = y;
++  rect.w = w;
++  rect.h = h;
++}
++
++static void UpdateRects(SDL_Surface * video)
++{
++  SDL_UpdateRects(video, s_NumRects, s_Rects);
++  s_NumRects = 0;
++}
++
++static void u1(int x, int y, int f0, int f, int blx, int bly) {
+   int by = bly*y;
+   int bx = blx*x;
+   int bw = f*blx/256;
+   int bh = (y == 12) ? bly/2 : bly;
+ 
+   if (bw > 0)
+-    SDL_UpdateRect(video, bx, by, bw, bh);
++    UpdateRect(bx, by, bw, bh);
+ }
+ 
+-static void u2(SDL_Surface * video, int x, int y, int f0, int f, int blx, int bly) {
++static void u2(int x, int y, int f0, int f, int blx, int bly) {
+   int by = bly*y;
+   int bx = blx*x;
+   int bw = blx;
+@@ -191,10 +225,10 @@ static void u2(SDL_Surface * video, int x, int y, int f0, int f, int blx, int bl
+   bh = bh*f/256;
+ 
+   if (bh > 0)
+-    SDL_UpdateRect(video, bx, by, bw, bh);
++    UpdateRect(bx, by, bw, bh);
+ }
+ 
+-static void u3(SDL_Surface * video, int x, int y, int f0, int f, int blx, int bly) {
++static void u3(int x, int y, int f0, int f, int blx, int bly) {
+   int by = bly*y + bly/2 - bly/2*f/256;
+   int bx = blx*x + blx/2 - blx/2*f/256;
+   int bw = blx;
+@@ -204,11 +238,10 @@ static void u3(SDL_Surface * video, int x, int y, int f0, int f, int blx, int bl
+   bw = bw*f/256;
+ 
+   if (bh > 0)
+-    SDL_UpdateRect(video, bx, by, bw, bh);
++    UpdateRect(bx, by, bw, bh);
+ }
+ 
+-static void u4(SDL_Surface * video, int x, int y, int f0, int f, int blx, int bly) {
+-
++static void u4(int x, int y, int f0, int f, int blx, int bly) {
+   uint8_t rnd = (x+20*y) % 64;
+ 
+   f0 /= 4;
+@@ -230,7 +263,7 @@ static void u4(SDL_Surface * video, int x, int y, int f0, int f, int blx, int bl
+       bh = bh/8;
+ 
+       if (bh > 0)
+-        SDL_UpdateRect(video, bx, by, bw, bh);
++        UpdateRect(bx, by, bw, bh);
+     }
+ 
+     rnd = (21*rnd+11) % 64;
+@@ -240,7 +273,7 @@ static void u4(SDL_Surface * video, int x, int y, int f0, int f, int blx, int bl
+ bool screen_c::flipAnimate(void)
+ {
+   static int (*f)(int, int, int);
+-  static void (*u)(SDL_Surface *, int, int, int, int, int, int);
++  static void (*u)(int, int, int, int, int, int);
+ 
+   if (animationState == 0) {
+     switch (rand()%3) {
+@@ -271,12 +304,16 @@ bool screen_c::flipAnimate(void)
+ 
+         if (valNew != valOld)
+         {
+-          u(video, x, y, valOld, valNew, gr.blockX(), gr.blockY());
++          u(x, y, valOld, valNew, gr.blockX(), gr.blockY());
+         }
+       }
+     }
+   }
+ 
++  s_ResX = gr.resolutionX();
++  s_ResY = gr.resolutionY();
++  UpdateRects(video);
++
+   if (animationState == 64)
+   {
+     animationState = 0;
 diff --git a/src/window.cpp b/src/window.cpp
 index 2b69534..77aab41 100644
 --- a/src/window.cpp

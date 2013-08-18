@@ -6,28 +6,27 @@
 source pkg_info
 source ../../../build_tools/common.sh
 
-export DEPS_LIBS="-lpng12 -lSDL_mixer -lSDL_ttf -lSDL -lppapi_cpp -lSDLmain -lppapi_cpp -lnacl_io -lppapi_gles2 -lRegal -lstdc++ -lppapi -lpthread -llua -lm -lnosys"
+export DEPS_LIBS="-ltar -lpng12 -lSDL_mixer -lSDL_ttf -lSDLmain -lSDL -lppapi_cpp -lSDLmain -lnacl_io -lppapi_gles2 -lRegal -lstdc++ -lppapi -lpthread -llua -lm -lnosys"
 export LIBTOOLFLAGS="--preserve-dup-deps"
 
 PUBLISH_DIR="${NACL_PACKAGES_PUBLISH}/${PACKAGE_NAME}"
-TAR_DIR="${PUBLISH_DIR}/.tar"
+DATA_DIR="${PUBLISH_DIR}/.data"
 
 CustomConfigureStep() {
   MakeDir ${PUBLISH_DIR}
 
-  export EXTRA_CONFIGURE_ARGS="--bindir=${PUBLISH_DIR} --datarootdir=${TAR_DIR}"
+  export EXTRA_CONFIGURE_ARGS="--bindir=${PUBLISH_DIR} --datarootdir=${DATA_DIR}"
   DefaultConfigureStep
 }
 
 CustomInstallStep() {
-
   DefaultInstallStep
 
-  ChangeDir ${TAR_DIR}
+  ChangeDir ${DATA_DIR}/pushover
   tar cf ${PUBLISH_DIR}/pushover.tar .
   cp ${START_DIR}/pushover.html ${PUBLISH_DIR}
   cd ${PUBLISH_DIR}
-  rm -rf ${TAR_DIR}
+  rm -rf ${DATA_DIR}
   python ${NACL_SDK_ROOT}/tools/create_nmf.py \
       ${NACL_CREATE_NMF_FLAGS} \
       pushover*${NACL_EXEEXT} \

@@ -238,6 +238,7 @@ InjectSystemHeaders() {
     return
   fi
 
+  LogExecute mkdir -p ${NACLPORTS_PREFIX}/include
   LogExecute cp -r ${TC_INCLUDES}/* ${NACLPORTS_PREFIX}/include
 }
 

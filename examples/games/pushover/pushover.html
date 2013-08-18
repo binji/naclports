@@ -9,6 +9,43 @@
       function moduleDidLoad() {
         document.getElementById('message').hidden = true;
       }
+
+      function createModule() {
+        var listenerEl = document.getElementById('listener');
+        var embedEl = document.createElement('embed');
+        embedEl.setAttribute('type', 'application/x-nacl');
+        embedEl.setAttribute('src', 'pushover.nmf');
+        embedEl.setAttribute('width', '800');
+        embedEl.setAttribute('height', '600');
+        listenerEl.appendChild(embedEl);
+      }
+
+      function requestQuota(size, onSuccess, onError) {
+        if (navigator.webkitPersistentStorage) {
+          return navigator.webkitPersistentStorage.requestQuota(
+              size, onSuccess, onError);
+        } else {
+          return window.webkitStorageInfo.requestQuota(
+              window.PERSISTENT, size, onSuccess, onError);
+        }
+      }
+
+      document.addEventListener('DOMContentLoaded', function() {
+        var onSuccess = function(size) {
+          if (size == 0) {
+            onError();
+            return;
+          }
+
+          createModule();
+        };
+
+        var onError = function() {
+          document.getElementById('message').textContent = 'Cancelled by user';
+        };
+
+        requestQuota(5*1024*1024, onSuccess, onError);
+      });
     </script>
   </head>
   <body>
@@ -43,11 +80,6 @@
         document.getElementById('listener').
             addEventListener('load', moduleDidLoad, true);
       </script>
-      <embed name="nacl_module"
-             id="pushover"
-             width=800 height=600
-             src="pushover.nmf"
-             type="application/x-nacl" />
     </div>
     <br>
   </body>
