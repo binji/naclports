@@ -6,16 +6,16 @@
 source pkg_info
 source ../../../build_tools/common.sh
 
-export DEPS_LIBS="-ltar -lpng12 -lSDL_mixer -lSDL_ttf -lSDLmain -lSDL -lppapi_cpp -lSDLmain -lnacl_io -lppapi_gles2 -lRegal -lstdc++ -lppapi -lpthread -llua -lm -lnosys"
+export DEPS_LIBS="-ltar -lpng12 -lSDL_mixer -lSDL_ttf -lSDLmain -lSDL \
+                  -lppapi_cpp -lSDLmain -lnacl_io -lppapi_gles2 \
+                  -lRegal -lppapi -lpthread -llua -lm -lnosys"
 export LIBTOOLFLAGS="--preserve-dup-deps"
 
-PUBLISH_DIR="${NACL_PACKAGES_PUBLISH}/${PACKAGE_NAME}"
 DATA_DIR="${PUBLISH_DIR}/.data"
 
 CustomConfigureStep() {
-  MakeDir ${PUBLISH_DIR}
-
-  export EXTRA_CONFIGURE_ARGS="--bindir=${PUBLISH_DIR} --datarootdir=${DATA_DIR}"
+  export EXTRA_CONFIGURE_ARGS="--bindir=${PUBLISH_DIR} \
+                               --datarootdir=${DATA_DIR}"
   DefaultConfigureStep
 }
 
