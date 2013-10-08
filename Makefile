@@ -121,6 +121,7 @@ LIBRARIES = \
      libraries/libvorbis \
      libraries/libxml2 \
      libraries/lua \
+     libraries/metakit \
      libraries/Mesa \
      libraries/mpg123 \
      libraries/nacl-mounts \
@@ -329,6 +330,7 @@ libav: libraries/libav ;
 lua: libraries/lua ;
 mesa: libraries/Mesa ;
 mesagl: examples/graphics/mesagl ;
+metakit: libraries/metakit ;
 mikmod: libraries/libmikmod ;
 mng: libraries/libmng ;
 modplug: libraries/libmodplug ;
