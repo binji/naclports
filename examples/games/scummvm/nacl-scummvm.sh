@@ -13,6 +13,9 @@ readonly BASS_FLOPPY_NAME=BASS-Floppy-1.3
 readonly LURE_URL=http://commondatastorage.googleapis.com/nativeclient-mirror/nacl/scummvm_games/lure/lure-1.1.zip
 readonly LURE_NAME=lure-1.1
 
+readonly FOTAQ_URL=http://commondatastorage.googleapis.com/nativeclient-mirror/nacl/scummvm_games/amazon/FOTAQ_Floppy.zip
+readonly FOTAQ_NAME=FOTAQ_Floppy
+
 EXECUTABLES=scummvm
 
 SCUMMVM_EXAMPLE_DIR=${NACL_SRC}/examples/games/scummvm
@@ -74,7 +77,21 @@ ConfigureStep() {
     --disable-timidity \
     --disable-all-engines \
     --enable-engine=lure \
-    --enable-engine=sky
+    --enable-engine=sky \
+    --enable-engine=queen
+}
+
+MakeGameTarball() {
+  local dirname=$1
+  local gamename=$2
+
+  DIR=${dirname}/usr/local/share/scummvm/${gamename}
+  mkdir -p ${DIR}
+  cp -r ${NACL_PACKAGES_REPOSITORY}/${gamename}/* ${DIR}
+  cd ${dirname}
+  tar cf ../${dirname}.tar ./
+  cd ..
+
 }
 
 InstallStep() {
@@ -98,21 +115,9 @@ InstallStep() {
   tar cf ../runimage.tar ./
   cd ..
 
-  #Beneath a Steel Sky (Floppy version)
-  BASS_DIR=bass/usr/local/share/scummvm/${BASS_FLOPPY_NAME}
-  mkdir -p ${BASS_DIR}
-  cp -r ${NACL_PACKAGES_REPOSITORY}/${BASS_FLOPPY_NAME}/* ${BASS_DIR}
-  cd bass
-  tar cf ../bass.tar ./
-  cd ..
-
-  #Lure of the temptress
-  LURE_DIR=lure/usr/local/share/scummvm
-  mkdir -p ${LURE_DIR}
-  cp -r ${NACL_PACKAGES_REPOSITORY}/${LURE_NAME}/* ${LURE_DIR}
-  cd lure
-  tar cf ../lure.tar ./
-  cd ..
+  MakeGameTarball bass ${BASS_FLOPPY_NAME}
+  MakeGameTarball lure ${LURE_NAME}
+  MakeGameTarball fotaq ${FOTAQ_NAME}
 
   Banner "Publishing to ${PUBLISH_DIR}"
   MakeDir ${PUBLISH_DIR}
@@ -187,6 +192,7 @@ GameGetStep() {
 PackageInstall() {
   GameGetStep ${BASS_FLOPPY_URL} ${BASS_FLOPPY_NAME}
   GameGetStep ${LURE_URL} ${LURE_NAME}
+  GameGetStep ${FOTAQ_URL} ${FOTAQ_NAME}
   DefaultPackageInstall
 }
 
