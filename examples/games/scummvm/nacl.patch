@@ -1,5 +1,5 @@
 diff --git a/backends/platform/sdl/posix/posix-main.cpp b/backends/platform/sdl/posix/posix-main.cpp
-index 5f0914e..2bd2995 100644
+index 5f0914e..4f11f2f 100644
 --- a/backends/platform/sdl/posix/posix-main.cpp
 +++ b/backends/platform/sdl/posix/posix-main.cpp
 @@ -20,6 +20,13 @@
@@ -51,7 +51,7 @@ index 5f0914e..2bd2995 100644
 +	
 +	int src_fd = open(src, O_RDONLY);
 +	assert(src_fd != -1);
-+	int dst_fd = open(dst, O_WRONLY);
++	int dst_fd = open(dst, O_WRONLY | O_CREAT);
 +	assert(dst_fd != -1);
 +	
 +	int bytes_read;
@@ -93,11 +93,11 @@ index 5f0914e..2bd2995 100644
 +        CHECK(mount("", "/home", "html5fs", 0, "type=PERSISTENT"));
 +	CHECK(setenv("HOME", "/home", 1));
 +
-+	const char kConfigFile[] = "/home/.scummvmrm";
++	const char kConfigFile[] = "/home/.scummvmrc";
 +	if (!FileExists(kConfigFile)) {
 +		// Initialize with a default .scummvmrm that already has the
 +		// games loaded.
-+		CopyFile("/mnt/http/scummvmrm", kConfigFile);
++		CopyFile("/mnt/http/scummvmrc", kConfigFile);
 +        }
 +#else
  int main(int argc, char *argv[]) {
