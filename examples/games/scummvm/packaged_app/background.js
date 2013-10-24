@@ -4,8 +4,9 @@
 
 function onLaunched(launchData) {
   chrome.app.window.create('index.html', {
-    width: 1024,
+    width: 640,
     height: 800,
+    frame: 'none'
   });
 }
 
